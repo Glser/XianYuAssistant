@@ -24,6 +24,10 @@ public class XianyuKamiItem {
 
     private Integer sortOrder;
 
+    private Long newApiRedemptionId;
+
+    private Integer newApiManaged;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime = LocalDateTime.now();
 }

@@ -397,6 +397,8 @@ CREATE TABLE IF NOT EXISTS xianyu_kami_item (
     order_id VARCHAR(100),                            -- 使用该卡密的订单ID
     used_time DATETIME,                               -- 使用时间
     sort_order INTEGER DEFAULT 0,                     -- 排序号（顺序发货时使用）
+    new_api_redemption_id BIGINT,                     -- new-api兑换码ID，用于联动删除
+    new_api_managed TINYINT DEFAULT 0,                -- 是否由new-api生成：0-否，1-是
     create_time DATETIME DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (kami_config_id) REFERENCES xianyu_kami_config(id)
 );

@@ -48,6 +48,13 @@ public interface XianyuKamiItemMapper extends BaseMapper<XianyuKamiItem> {
     @Select("SELECT COUNT(*) FROM xianyu_kami_item WHERE kami_config_id = #{kamiConfigId} AND kami_content = #{kamiContent}")
     int countByConfigIdAndContent(@Param("kamiConfigId") Long kamiConfigId, @Param("kamiContent") String kamiContent);
 
+    @Update("UPDATE xianyu_kami_item " +
+            "SET new_api_redemption_id = COALESCE(new_api_redemption_id, #{redemptionId}), new_api_managed = 1 " +
+            "WHERE kami_config_id = #{kamiConfigId} AND kami_content = #{kamiContent}")
+    int bindNewApiRedemptionId(@Param("kamiConfigId") Long kamiConfigId,
+                               @Param("kamiContent") String kamiContent,
+                               @Param("redemptionId") Long redemptionId);
+
     @Update("UPDATE xianyu_kami_item SET status = 1, order_id = #{orderId}, used_time = datetime('now', 'localtime') WHERE id = #{id} AND status = 0")
     int markUsed(@Param("id") Long id, @Param("orderId") String orderId);
 

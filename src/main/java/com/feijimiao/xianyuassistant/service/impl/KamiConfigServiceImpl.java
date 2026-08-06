@@ -16,7 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
@@ -196,6 +198,47 @@ public class KamiConfigServiceImpl implements KamiConfigService {
     }
 
     @Override
+    @Transactional
+    public int importGeneratedKamiItems(Long kamiConfigId, Map<String, Long> kamiContents) {
+        XianyuKamiConfig config = kamiConfigMapper.selectById(kamiConfigId);
+        if (config == null) {
+            throw new IllegalArgumentException("卡密配置不存在");
+        }
+
+        Map<String, Long> normalizedContents = new LinkedHashMap<>();
+        if (kamiContents != null) {
+            for (Map.Entry<String, Long> entry : kamiContents.entrySet()) {
+                String content = entry.getKey();
+                if (content != null && !content.trim().isEmpty()) {
+                    normalizedContents.putIfAbsent(content.trim(), entry.getValue());
+                }
+            }
+        }
+
+        int baseOrder = kamiItemMapper.countByConfigId(kamiConfigId);
+        int imported = 0;
+        for (Map.Entry<String, Long> entry : normalizedContents.entrySet()) {
+            String content = entry.getKey();
+            if (kamiItemMapper.countByConfigIdAndContent(kamiConfigId, content) > 0) {
+                kamiItemMapper.bindNewApiRedemptionId(kamiConfigId, content, entry.getValue());
+                continue;
+            }
+
+            XianyuKamiItem item = new XianyuKamiItem();
+            item.setKamiConfigId(kamiConfigId);
+            item.setKamiContent(content);
+            item.setStatus(0);
+            item.setSortOrder(baseOrder + imported);
+            item.setNewApiRedemptionId(entry.getValue());
+            item.setNewApiManaged(1);
+            kamiItemMapper.insert(item);
+            imported++;
+        }
+        refreshConfigCounts(kamiConfigId);
+        return imported;
+    }
+
+    @Override
     public ResultObject<List<KamiItemRespDTO>> getKamiItemsByConfigId(Long kamiConfigId) {
         try {
             List<XianyuKamiItem> items = kamiItemMapper.findByConfigId(kamiConfigId);
@@ -318,6 +361,16 @@ public class KamiConfigServiceImpl implements KamiConfigService {
     }
 
     @Override
+    public XianyuKamiItem getKamiItem(Long id) {
+        return kamiItemMapper.selectById(id);
+    }
+
+    @Override
+    public List<XianyuKamiItem> getKamiItems(Long kamiConfigId) {
+        return kamiItemMapper.findByConfigId(kamiConfigId);
+    }
+
+    @Override
     public ResultObject<List<KamiItemRespDTO>> exportKamiItems(KamiExportReqDTO reqDTO) {
         try {
             List<XianyuKamiItem> items = new ArrayList<>();
@@ -380,6 +433,8 @@ public class KamiConfigServiceImpl implements KamiConfigService {
         dto.setOrderId(item.getOrderId());
         dto.setUsedTime(item.getUsedTime());
         dto.setSortOrder(item.getSortOrder());
+        dto.setNewApiRedemptionId(item.getNewApiRedemptionId());
+        dto.setNewApiManaged(item.getNewApiManaged());
         dto.setCreateTime(item.getCreateTime());
         return dto;
     }

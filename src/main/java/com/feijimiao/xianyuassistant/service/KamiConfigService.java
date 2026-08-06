@@ -6,6 +6,7 @@ import com.feijimiao.xianyuassistant.entity.XianyuKamiConfig;
 import com.feijimiao.xianyuassistant.entity.XianyuKamiItem;
 
 import java.util.List;
+import java.util.Map;
 
 public interface KamiConfigService {
 
@@ -21,6 +22,8 @@ public interface KamiConfigService {
 
     ResultObject<Integer> batchImportKamiItems(KamiBatchImportReqDTO reqDTO);
 
+    int importGeneratedKamiItems(Long kamiConfigId, Map<String, Long> kamiContents);
+
     ResultObject<List<KamiItemRespDTO>> getKamiItemsByConfigId(Long kamiConfigId);
 
     ResultObject<List<KamiItemRespDTO>> getKamiItemsByConfigIdWithFilter(KamiItemQueryReqDTO reqDTO);
@@ -32,6 +35,10 @@ public interface KamiConfigService {
     XianyuKamiItem acquireKami(Long kamiConfigId, String orderId);
 
     XianyuKamiConfig getConfig(Long kamiConfigId);
+
+    XianyuKamiItem getKamiItem(Long id);
+
+    List<XianyuKamiItem> getKamiItems(Long kamiConfigId);
 
     ResultObject<List<KamiItemRespDTO>> exportKamiItems(KamiExportReqDTO reqDTO);
 }

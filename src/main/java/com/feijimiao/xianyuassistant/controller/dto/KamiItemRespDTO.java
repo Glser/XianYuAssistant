@@ -21,5 +21,9 @@ public class KamiItemRespDTO {
 
     private Integer sortOrder;
 
+    private Long newApiRedemptionId;
+
+    private Integer newApiManaged;
+
     private LocalDateTime createTime;
 }

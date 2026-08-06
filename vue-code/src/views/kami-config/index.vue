@@ -10,6 +10,7 @@ import {
   queryKamiItems,
   addKamiItem,
   batchImportKamiItems,
+  generateNewApiRedemptions,
   deleteKamiItem,
   resetKamiItem,
   exportKamiItems,
@@ -38,6 +39,14 @@ const createLoading = ref(false)
 const showImportDialog = ref(false)
 const importContent = ref('')
 const importLoading = ref(false)
+
+const showGenerateDialog = ref(false)
+const generateForm = ref({
+  name: '',
+  amountCny: 1,
+  count: 1
+})
+const generateLoading = ref(false)
 
 const showAddDialog = ref(false)
 const addContent = ref('')
@@ -269,6 +278,57 @@ const handleBatchImport = async () => {
   }
 }
 
+const openGenerateDialog = () => {
+  const defaultName = selectedConfig.value?.aliasName?.trim() || '闲鱼卡密'
+  generateForm.value = {
+    name: defaultName.slice(0, 20),
+    amountCny: 1,
+    count: 1
+  }
+  showGenerateDialog.value = true
+}
+
+const handleGenerateRedemptions = async () => {
+  const name = generateForm.value.name.trim()
+  const amountCny = Number(generateForm.value.amountCny)
+  const count = Number(generateForm.value.count)
+  if (!selectedConfigId.value) {
+    toast.warning('请先选择卡密仓库')
+    return
+  }
+  if (!name || name.length > 20) {
+    toast.warning('兑换码名称长度应为1至20个字符')
+    return
+  }
+  if (!Number.isFinite(amountCny) || amountCny < 0.01 || amountCny > 4000) {
+    toast.warning('人民币额度应在0.01至4000元之间')
+    return
+  }
+  if (!Number.isInteger(count) || count < 1 || count > 100) {
+    toast.warning('生成数量应为1至100的整数')
+    return
+  }
+
+  generateLoading.value = true
+  try {
+    const res = await generateNewApiRedemptions({
+      kamiConfigId: selectedConfigId.value,
+      name,
+      amountCny,
+      count
+    })
+    if (res.code === 200) {
+      toast.success(res.msg || `成功生成并入库${res.data?.importedCount || 0}个兑换码`)
+      showGenerateDialog.value = false
+      await Promise.all([loadKamiItems(), loadKamiConfigs()])
+    }
+  } catch {
+    await Promise.all([loadKamiItems(), loadKamiConfigs()])
+  } finally {
+    generateLoading.value = false
+  }
+}
+
 const handleDeleteItem = async (item: KamiItem) => {
   try {
     await showConfirm('确定删除该卡密？', '删除确认')
@@ -454,7 +514,8 @@ onMounted(async () => {
           </div>
           <div class="kami-mobile__detail-actions">
             <button class="btn-default btn-sm" @click="showAddDialog = true">添加</button>
-            <button class="btn-primary btn-sm" @click="showImportDialog = true">批量导入</button>
+            <button class="btn-primary btn-sm" @click="openGenerateDialog">生成</button>
+            <button class="btn-default btn-sm" @click="showImportDialog = true">批量导入</button>
             <button class="btn-success btn-sm" @click="openExportDialog">导出</button>
             <button class="btn-warning btn-sm" @click="openAlertDialog">预警</button>
           </div>
@@ -562,7 +623,8 @@ onMounted(async () => {
               <h2>{{ selectedConfig.aliasName || `配置#${selectedConfig.id}` }}</h2>
               <div class="kami-detail__actions">
                 <button class="btn-default" @click="showAddDialog = true">添加卡密</button>
-                <button class="btn-primary" @click="showImportDialog = true">批量导入</button>
+                <button class="btn-primary" @click="openGenerateDialog">生成兑换码</button>
+                <button class="btn-default" @click="showImportDialog = true">批量导入</button>
                 <button class="btn-success" @click="openExportDialog">导出</button>
                 <button class="btn-warning" @click="openAlertDialog">预警配置</button>
               </div>
@@ -671,6 +733,48 @@ onMounted(async () => {
             <div class="modal-footer">
               <button class="btn btn-secondary" @click="showAddDialog = false">取消</button>
               <button class="btn btn-primary" :class="{ 'is-loading': addLoading }" :disabled="addLoading" @click="handleAddKami">确定</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- 从new-api生成并导入 -->
+      <Transition name="modal">
+        <div v-if="showGenerateDialog" class="modal-overlay" @click.self="showGenerateDialog = false">
+          <div class="modal-container modal-container--generate">
+            <div class="modal-header">
+              <h2 class="modal-title">生成兑换码</h2>
+              <button class="modal-close" aria-label="关闭" @click="showGenerateDialog = false">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="form-row">
+                <label class="form-label">目标仓库</label>
+                <span class="form-value">{{ selectedConfig?.aliasName || `配置#${selectedConfigId}` }}</span>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="redemption-name">兑换码名称</label>
+                <input id="redemption-name" v-model="generateForm.name" class="form-input" maxlength="20" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="redemption-amount">单码金额</label>
+                <input id="redemption-amount" v-model.number="generateForm.amountCny" class="form-input form-input--num" type="number" min="0.01" max="4000" step="0.01" />
+                <span class="form-suffix">元</span>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="redemption-count">生成数量</label>
+                <input id="redemption-count" v-model.number="generateForm.count" class="form-input form-input--num" type="number" min="1" max="100" step="1" />
+                <span class="form-suffix">个</span>
+              </div>
+              <div class="form-row">
+                <label class="form-label">有效期</label>
+                <span class="form-value">永不过期</span>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" :disabled="generateLoading" @click="showGenerateDialog = false">取消</button>
+              <button class="btn btn-primary" :class="{ 'is-loading': generateLoading }" :disabled="generateLoading" @click="handleGenerateRedemptions">
+                {{ generateLoading ? '生成中...' : '生成并入库' }}
+              </button>
             </div>
           </div>
         </div>
@@ -1066,6 +1170,7 @@ onMounted(async () => {
 
 .kami-mobile__detail-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -1251,6 +1356,33 @@ onMounted(async () => {
 .form-input--num {
   width: 100px;
   flex: none;
+}
+
+.form-value {
+  min-width: 0;
+  color: #1c1c1e;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .kami-mobile__detail-actions button {
+    min-height: 44px;
+  }
+
+  .modal-container--generate .modal-close,
+  .modal-container--generate .form-input,
+  .modal-container--generate .modal-footer .btn {
+    min-height: 44px;
+  }
+
+  .modal-container--generate .modal-close {
+    width: 44px;
+  }
+
+  .modal-container--generate .form-input {
+    font-size: 16px;
+  }
 }
 
 .form-textarea {

@@ -3,6 +3,7 @@ package com.feijimiao.xianyuassistant.controller;
 import com.feijimiao.xianyuassistant.common.ResultObject;
 import com.feijimiao.xianyuassistant.controller.dto.*;
 import com.feijimiao.xianyuassistant.service.KamiConfigService;
+import com.feijimiao.xianyuassistant.service.NewApiRedemptionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +19,9 @@ public class KamiConfigController {
 
     @Autowired
     private KamiConfigService kamiConfigService;
+
+    @Autowired
+    private NewApiRedemptionService newApiRedemptionService;
 
     @PostMapping("/save")
     public ResultObject<KamiConfigRespDTO> saveOrUpdateConfig(@Valid @RequestBody KamiConfigReqDTO reqDTO) {
@@ -53,7 +57,7 @@ public class KamiConfigController {
     @PostMapping("/delete")
     public ResultObject<Void> deleteConfig(@RequestParam("id") Long id) {
         try {
-            return kamiConfigService.deleteConfig(id);
+            return newApiRedemptionService.deleteConfigAndRedemptions(id);
         } catch (Exception e) {
             log.error("删除卡密配置失败", e);
             return ResultObject.failed("删除卡密配置失败: " + e.getMessage());
@@ -103,7 +107,7 @@ public class KamiConfigController {
     @PostMapping("/item/delete")
     public ResultObject<Void> deleteKamiItem(@RequestParam("id") Long id) {
         try {
-            return kamiConfigService.deleteKamiItem(id);
+            return newApiRedemptionService.deleteRedemptionAndKami(id);
         } catch (Exception e) {
             log.error("删除卡密失败", e);
             return ResultObject.failed("删除卡密失败: " + e.getMessage());

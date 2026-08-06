@@ -42,6 +42,24 @@ export interface QueryKamiItemsReq {
   keyword?: string;
 }
 
+export interface GenerateNewApiRedemptionsReq {
+  kamiConfigId: number;
+  name: string;
+  amountCny: number;
+  count: number;
+}
+
+export interface GenerateNewApiRedemptionsResp {
+  kamiConfigId: number;
+  amountCny: number;
+  quota: number;
+  expiredTime: number;
+  generatedCount: number;
+  importedCount: number;
+  duplicateCount: number;
+  codes: string[];
+}
+
 export function saveKamiConfig(data: SaveKamiConfigReq) {
   return request<KamiConfig>({
     url: '/kami-config/save',
@@ -85,6 +103,14 @@ export function addKamiItem(data: { kamiConfigId: number; kamiContent: string })
 export function batchImportKamiItems(data: { kamiConfigId: number; kamiContents: string }) {
   return request<number>({
     url: '/kami-config/item/batchImport',
+    method: 'POST',
+    data
+  });
+}
+
+export function generateNewApiRedemptions(data: GenerateNewApiRedemptionsReq) {
+  return request<GenerateNewApiRedemptionsResp>({
+    url: '/new-api/redemption/generate',
     method: 'POST',
     data
   });
