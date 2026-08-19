@@ -83,7 +83,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/xianyu-assistant:${{ steps.version.outputs.version }}
+          tags: ghcr.io/glser/xianyu-assistant:${{ steps.version.outputs.version }}
 
       # ========== SSH 到服务器：拉取镜像并重启 ==========
       - name: SSH 部署后端并重载 Nginx
