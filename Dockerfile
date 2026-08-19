@@ -1,36 +1,23 @@
-# ===== 多阶段构建 =====
+# ============================================================
+# XianYuAssistant - 纯后端 Docker 镜像（方案 A：前端由 Nginx 独立托管）
+# 前端构建：cd vue-code && npm run build，产物在 vue-code/dist，交给 Nginx
+# 后端：本镜像，暴露 12400，由 Nginx 反代 /api 和 /ai
+# ============================================================
 
-# 阶段1: 构建前端
-FROM node:20-alpine AS frontend-build
-
-WORKDIR /app/vue-code
-
-# 设置 npm 镜像源
-RUN npm config set registry https://registry.npmmirror.com
-
-# 先复制依赖文件，利用缓存
-COPY vue-code/package.json vue-code/package-lock.json ./
-RUN npm ci
-
-# 复制前端源码并构建
-COPY vue-code/ ./
-RUN npm run build:spring
-
-# 阶段2: 构建后端 JAR
+# ===== 构建阶段 =====
 FROM eclipse-temurin:21-jdk-alpine AS backend-build
 
 WORKDIR /app
 
-# 配置阿里云 Maven 镜像
-RUN mkdir -p /root/.m2 && echo '<?xml version="1.0" encoding="UTF-8"?><settings xmlns="http://maven.apache.org/SETTINGS/1.2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd"><mirrors><mirror><id>aliyun</id><mirrorOf>central</mirrorOf><name>Aliyun Maven</name><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>' > /root/.m2/settings.xml
+# 配置国内 Maven 镜像
+RUN mkdir -p /root/.m2 && echo '<?xml version="1.0" encoding="UTF-8"?><settings xmlns="http://maven.apache.org/SETTINGS/1.2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd"><mirrors><mirror><id>aliyun</id><mirrorOf>central</mirrorOf><name>Huawei Cloud Maven</name><url>https://repo.huaweicloud.com/repository/maven</url></mirror></mirrors></settings>' > /root/.m2/settings.xml
 
 # 先复制 Maven 配置和 pom.xml，利用缓存
 COPY .mvn/ .mvn/
 COPY mvnw mvnw.cmd pom.xml ./
 RUN chmod +x mvnw
 
-# 复制前端构建产物到 static 目录
-COPY --from=frontend-build /app/vue-code/../src/main/resources/static src/main/resources/static/
+ENV MVNW_VERBOSE=true
 
 # 复制后端源码
 COPY src/ src/
@@ -38,27 +25,30 @@ COPY src/ src/
 # 构建 JAR（跳过测试）
 RUN ./mvnw clean package -DskipTests
 
-# 阶段3: 运行时镜像
+# ===== 运行时阶段 =====
 FROM eclipse-temurin:21-jre-alpine
 
 LABEL maintainer="IAMLZY"
-LABEL description="XianYuAssistant - 闲鱼自动化管理系统"
+LABEL description="XianYuAssistant - 闲鱼自动化管理系统（后端）"
 
 WORKDIR /app
 
 # 创建数据目录
 RUN mkdir -p /app/dbdata /app/logs /app/ms-playwright
 
-# 从构建阶段复制 JAR
-COPY --from=backend-build /app/target/XianYuAssistant-2.0.3.jar app.jar
+# 从构建阶段复制 JAR（用通配符避免版本号硬编码）
+COPY --from=backend-build /app/target/*.jar app.jar
 
 # 暴露端口
 EXPOSE 12400
 
+# 数据卷声明：数据库和日志持久化
+# 运行时请务必挂载：-v xianyu-dbdata:/app/dbdata -v xianyu-logs:/app/logs
+VOLUME ["/app/dbdata", "/app/logs"]
+
 # 环境变量
 ENV JAVA_OPTS="-Xms256m -Xmx512m"
 ENV SERVER_PORT=12400
-ENV ALI_API_KEY=""
 
 # 启动命令
 ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS} -Dserver.port=${SERVER_PORT} -jar app.jar"]
