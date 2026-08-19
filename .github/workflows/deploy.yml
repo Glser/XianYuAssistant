@@ -10,31 +10,45 @@ concurrency:
   group: deploy-fish-oioi-lat
   cancel-in-progress: false
 
-# GITHUB_TOKEN 需要写 packages 权限才能推送到 GHCR
+# 镜像推送到阿里云 ACR；登录凭证由 Repository secrets 提供。
 permissions:
   contents: read
-  packages: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      # 服务器在北京，默认使用北京 ACR。可用 Repository variable ACR_REGISTRY 覆盖。
+      ACR_REGISTRY: ${{ vars.ACR_REGISTRY || 'registry.cn-beijing.aliyuncs.com' }}
+      ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
+
+      - name: 校验 ACR 配置
+        run: |
+          if [[ ! "$ACR_NAMESPACE" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+            echo "请在 Settings > Secrets and variables > Actions > Variables 中设置 ACR_NAMESPACE。"
+            exit 1
+          fi
 
       - name: 提取版本号
         id: version
         run: |
           VERSION=$(grep -A1 '<artifactId>XianYuAssistant</artifactId>' pom.xml | grep '<version>' | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [ -z "$VERSION" ]; then
+            echo "无法从 pom.xml 提取项目版本号。"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "镜像版本: $VERSION"
 
       # ========== 前端构建 ==========
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: vue-code/package-lock.json
 
       - name: 构建前端
@@ -67,20 +81,25 @@ jobs:
           strip_components: 2
           overwrite: true
 
-      # ========== 构建并推送后端镜像到 GHCR ==========
-      - name: 登录 GHCR
+      # ========== 构建并推送后端镜像到北京 ACR ==========
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录阿里云 ACR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       - name: 构建并推送后端镜像
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/glser/xianyu-assistant:${{ steps.version.outputs.version }}
+          tags: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/xianyu-assistant:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # ========== SSH 到服务器：拉取镜像并重启 ==========
       - name: SSH 部署后端并重载 Nginx
@@ -89,24 +108,73 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          # appleboy/ssh-action 默认约 10 分钟；镜像首拉取可超过该时间。
+          command_timeout: 40m
           script: |
-            set -e
+            set -u
             mkdir -p /app/fish/db /app/fish/logs /app/nginx/html/fish.oioi.lat
             docker network inspect app-network >/dev/null 2>&1 || docker network create app-network
-            IMAGE="ghcr.io/glser/xianyu-assistant:${{ steps.version.outputs.version }}"
+
+            IMAGE="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/xianyu-assistant:${{ steps.version.outputs.version }}"
             echo "=== 拉取镜像: ${IMAGE} ==="
-            docker pull "$IMAGE"
-            docker rm -f xianyu-assistant || true
-            docker run -d \
-              --name xianyu-assistant \
-              --restart unless-stopped \
-              --network app-network \
-              -p 127.0.0.1:12400:12400 \
-              -v /app/fish/db:/app/dbdata \
-              -v /app/fish/logs:/app/logs \
-              "$IMAGE"
-            docker exec nginx nginx -t
-            docker exec nginx nginx -s reload
+
+            PULL_SUCCESS=0
+            for attempt in 1 2 3; do
+              echo "第 ${attempt}/3 次拉取镜像"
+              if docker pull "$IMAGE"; then
+                PULL_SUCCESS=1
+                break
+              fi
+              sleep 20
+            done
+            if [ "$PULL_SUCCESS" -ne 1 ]; then
+              echo "镜像拉取连续失败 3 次。"
+              exit 1
+            fi
+
+            OLD_IMAGE="$(docker inspect xianyu-assistant --format '{{.Config.Image}}' 2>/dev/null || true)"
+
+            run_app() {
+              docker run -d \
+                --name xianyu-assistant \
+                --restart unless-stopped \
+                --network app-network \
+                -p 127.0.0.1:12400:12400 \
+                -v /app/fish/db:/app/dbdata \
+                -v /app/fish/logs:/app/logs \
+                "$1"
+            }
+
+            wait_for_health() {
+              for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+                STATUS="$(docker inspect xianyu-assistant --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+                case "$STATUS" in
+                  healthy) return 0 ;;
+                  unhealthy|exited|dead)
+                    docker logs xianyu-assistant --tail 100 || true
+                    return 1
+                    ;;
+                esac
+                sleep 5
+              done
+              docker logs xianyu-assistant --tail 100 || true
+              return 1
+            }
+
+            rollback() {
+              echo "新容器启动失败，尝试恢复上一版本。"
+              docker rm -f xianyu-assistant >/dev/null 2>&1 || true
+              if [ -n "$OLD_IMAGE" ]; then
+                run_app "$OLD_IMAGE" || true
+              fi
+              exit 1
+            }
+
+            docker rm -f xianyu-assistant >/dev/null 2>&1 || true
+            run_app "$IMAGE" || rollback
+            wait_for_health || rollback
+            docker exec nginx nginx -t || rollback
+            docker exec nginx nginx -s reload || rollback
             docker image prune -f
             echo "=== 部署完成: ${IMAGE} ==="
             docker ps --filter name=xianyu-assistant --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"

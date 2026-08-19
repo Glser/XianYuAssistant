@@ -22,8 +22,9 @@ RUN mvn dependency:go-offline -B
 # 复制后端源码
 COPY src/ src/
 
-# 构建 JAR（跳过测试）
-RUN mvn clean package -DskipTests
+# 构建分层 JAR（跳过测试）。依赖层与业务代码层分离，更新代码时服务器无需重拉全部依赖。
+RUN mvn clean package -DskipTests && \
+    java -Djarmode=tools -jar target/*.jar extract --layers --destination /layers
 
 # ===== 运行时阶段 =====
 FROM eclipse-temurin:21-jre-alpine
@@ -36,8 +37,11 @@ WORKDIR /app
 # 创建数据目录
 RUN mkdir -p /app/dbdata /app/logs /app/ms-playwright
 
-# 从构建阶段复制 JAR（用通配符避免版本号硬编码）
-COPY --from=backend-build /app/target/*.jar app.jar
+# Spring Boot 分层文件。顺序从稳定到易变，Docker 可复用 Maven 依赖层。
+COPY --from=backend-build /layers/dependencies/ ./
+COPY --from=backend-build /layers/spring-boot-loader/ ./
+COPY --from=backend-build /layers/snapshot-dependencies/ ./
+COPY --from=backend-build /layers/application/ ./
 
 # 暴露端口
 EXPOSE 12400
@@ -50,5 +54,9 @@ VOLUME ["/app/dbdata", "/app/logs"]
 ENV JAVA_OPTS="-Xms256m -Xmx512m"
 ENV SERVER_PORT=12400
 
-# 启动命令
-ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS} -Dserver.port=${SERVER_PORT} -jar app.jar"]
+# 部署脚本据此判断新容器是否成功启动，失败时会恢复上一个镜像。
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=6 \
+  CMD wget -q -O /dev/null http://127.0.0.1:12400/api/system/version || exit 1
+
+# 从分层目录启动 Spring Boot。
+ENTRYPOINT ["sh", "-c", "exec java ${JAVA_OPTS} -Dserver.port=${SERVER_PORT} org.springframework.boot.loader.launch.JarLauncher"]
