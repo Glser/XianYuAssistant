@@ -35,6 +35,7 @@ build/
 
 ### Database ###
 /dbdata/
+/db/
 *.db
 *.db-journal
 /logs/

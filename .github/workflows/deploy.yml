@@ -1,0 +1,116 @@
+name: 自动部署到 fish.oioi.lat
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'vue-code/**'
+      - 'src/**'
+      - 'Dockerfile'
+      - 'pom.xml'
+      - 'deploy/nginx/**'
+      - 'deploy/deploy.sh'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+# 同一时间只跑一个部署，避免并发冲突
+concurrency:
+  group: deploy-fish-oioi-lat
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vue-code/package-lock.json
+
+      - name: 构建前端
+        working-directory: vue-code
+        run: |
+          npm ci
+          npm run build
+
+      - name: 上传前端产物到服务器（nginx html 目录）
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "vue-code/dist"
+          target: "/app/nginx/html"
+          strip_components: 2
+          overwrite: true
+
+      - name: 上传 Nginx 配置
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "deploy/nginx/fish.oioi.lat.conf"
+          target: "/app/nginx/conf.d"
+          strip_components: 2
+          overwrite: true
+
+      - name: SSH 部署后端并重载 Nginx
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+
+            # 确保数据目录存在（与项目同目录）
+            mkdir -p /app/fish/db /app/fish/logs
+
+            # 确保 docker 网络存在（nginx 已在 app-network）
+            docker network inspect app-network >/dev/null 2>&1 || docker network create app-network
+
+            # 拉取最新代码（首次自动 clone）
+            if [ ! -d /app/fish/.git ]; then
+              echo "=== 首次部署，克隆代码 ==="
+              git clone https://github.com/Glser/XianYuAssistant.git /app/fish
+            fi
+            cd /app/fish
+            git pull origin main
+
+            # 读取 pom.xml 项目版本号作为镜像 tag
+            VERSION=$(grep -A1 '<artifactId>XianYuAssistant</artifactId>' pom.xml | grep '<version>' | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
+            IMAGE_TAG="xianyu-assistant:${VERSION}"
+            echo "=== 构建镜像: ${IMAGE_TAG} ==="
+
+            # 构建后端镜像
+            docker build -t "$IMAGE_TAG" .
+
+            # 重建容器
+            # --network app-network：与 nginx 同网络，nginx 用容器名 xianyu-assistant 访问
+            # -p 127.0.0.1:12400：仅宿主机可访问，方便调试；nginx 通过容器网络访问不需要这个端口
+            docker rm -f xianyu-assistant || true
+            docker run -d \
+              --name xianyu-assistant \
+              --restart unless-stopped \
+              --network app-network \
+              -p 127.0.0.1:12400:12400 \
+              -v /app/fish/db:/app/dbdata \
+              -v /app/fish/logs:/app/logs \
+              "$IMAGE_TAG"
+
+            # 重载 Nginx（nginx 也是容器，用 docker exec）
+            docker exec nginx nginx -t
+            docker exec nginx nginx -s reload
+
+            # 保留最近 5 个版本镜像，删除更早的（避免磁盘占满）
+            docker images xianyu-assistant --format '{{.Tag}} {{.ID}}' | grep -v '<none>' | sort -r | tail -n +6 | awk '{print $2}' | xargs -r docker rmi -f 2>/dev/null || true
+            docker image prune -f
+
+            echo "=== 部署完成: ${IMAGE_TAG} ==="
+            docker ps --filter name=xianyu-assistant --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
