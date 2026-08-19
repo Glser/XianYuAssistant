@@ -98,6 +98,9 @@ jobs:
           context: .
           push: true
           tags: ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/xianyu-assistant:${{ steps.version.outputs.version }}
+          # ACR 个人版不支持 Buildx 默认生成的 OCI provenance attestation。
+          provenance: false
+          sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
