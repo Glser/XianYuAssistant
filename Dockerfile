@@ -24,7 +24,7 @@ COPY src/ src/
 
 # 构建分层 JAR（跳过测试）。依赖层与业务代码层分离，更新代码时服务器无需重拉全部依赖。
 RUN mvn clean package -DskipTests && \
-    java -Djarmode=tools -jar target/*.jar extract --layers --destination /layers
+    java -Djarmode=tools -jar target/*.jar extract --layers --launcher --destination /layers
 
 # ===== 运行时阶段 =====
 FROM eclipse-temurin:21-jre-alpine
