@@ -9,21 +9,21 @@ FROM eclipse-temurin:21-jdk-alpine AS backend-build
 
 WORKDIR /app
 
+# 安装 Maven
+RUN apk add --no-cache maven
+
 # 配置国内 Maven 镜像
 RUN mkdir -p /root/.m2 && echo '<?xml version="1.0" encoding="UTF-8"?><settings xmlns="http://maven.apache.org/SETTINGS/1.2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd"><mirrors><mirror><id>aliyun</id><mirrorOf>central</mirrorOf><name>Huawei Cloud Maven</name><url>https://repo.huaweicloud.com/repository/maven</url></mirror></mirrors></settings>' > /root/.m2/settings.xml
 
-# 先复制 Maven 配置和 pom.xml，利用缓存
-COPY .mvn/ .mvn/
-COPY mvnw mvnw.cmd pom.xml ./
-RUN chmod +x mvnw
-
-ENV MVNW_VERBOSE=true
+# 先复制 pom.xml，下载依赖（利用 Docker 缓存，后续构建更快）
+COPY pom.xml ./
+RUN mvn dependency:go-offline -B
 
 # 复制后端源码
 COPY src/ src/
 
 # 构建 JAR（跳过测试）
-RUN ./mvnw clean package -DskipTests
+RUN mvn clean package -DskipTests
 
 # ===== 运行时阶段 =====
 FROM eclipse-temurin:21-jre-alpine
