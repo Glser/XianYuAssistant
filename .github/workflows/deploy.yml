@@ -1,22 +1,24 @@
-name: 闲鱼助手自动部署 fish.oioi.lat
+name: 自动部署到 fish.oioi.lat
 
 on:
   push:
     branches: [master]
-    paths:
-      - 'vue-code/**'
-      - 'src/**'
-      - 'Dockerfile'
-      - 'pom.xml'
-      - 'deploy/nginx/**'
-      - 'deploy/deploy.sh'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
+    inputs:
+      deploy_all:
+        description: '强制全量部署（前端+后端+nginx）'
+        type: boolean
+        default: false
 
 # 同一时间只跑一个部署，避免并发冲突
 concurrency:
   group: deploy-fish-oioi-lat
   cancel-in-progress: false
+
+# GITHUB_TOKEN 需要写 packages 权限才能推送到 GHCR
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   deploy:
@@ -24,6 +26,8 @@ jobs:
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # paths-filter 需要完整提交历史
 
       - name: 提取版本号
         id: version
@@ -32,8 +36,23 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "镜像版本: $VERSION"
 
-      # ========== 前端构建 ==========
+      - name: 检测变更文件
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'vue-code/**'
+            backend:
+              - 'src/**'
+              - 'Dockerfile'
+              - 'pom.xml'
+            nginx:
+              - 'deploy/nginx/**'
+
+      # ==================== 前端（仅 vue-code 变更时执行）====================
       - name: 安装 Node.js
+        if: steps.changes.outputs.frontend == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_all)
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -41,13 +60,14 @@ jobs:
           cache-dependency-path: vue-code/package-lock.json
 
       - name: 构建前端
+        if: steps.changes.outputs.frontend == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_all)
         working-directory: vue-code
         run: |
           npm ci
           npm run build
 
-      # ========== 上传前端到服务器子目录 ==========
       - name: 上传前端产物到服务器
+        if: steps.changes.outputs.frontend == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_all)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -58,8 +78,9 @@ jobs:
           strip_components: 2
           overwrite: true
 
-      # ========== 上传 Nginx 配置 ==========
+      # ==================== Nginx 配置（仅 deploy/nginx 变更时执行）====================
       - name: 上传 Nginx 配置
+        if: steps.changes.outputs.nginx == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_all)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -70,8 +91,9 @@ jobs:
           strip_components: 2
           overwrite: true
 
-      # ========== 构建并推送后端镜像到 GHCR ==========
-      - name: 登录 GitHub Container Registry
+      # ==================== 后端（仅 src/Dockerfile/pom.xml 变更时执行）====================
+      - name: 登录 GHCR
+        if: steps.changes.outputs.backend == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_all)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -79,14 +101,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 构建并推送后端镜像
+        if: steps.changes.outputs.backend == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_all)
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: ghcr.io/glser/xianyu-assistant:${{ steps.version.outputs.version }}
 
-      # ========== SSH 到服务器：拉取镜像并重启 ==========
       - name: SSH 部署后端并重载 Nginx
+        if: steps.changes.outputs.backend == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy_all)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -94,19 +117,11 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             set -e
-
-            # 确保数据目录存在
             mkdir -p /app/fish/db /app/fish/logs /app/nginx/html/fish.oioi.lat
-
-            # 确保 docker 网络存在
             docker network inspect app-network >/dev/null 2>&1 || docker network create app-network
-
-            # 直接用 GitHub Actions 传入的版本号
             IMAGE="ghcr.io/glser/xianyu-assistant:${{ steps.version.outputs.version }}"
             echo "=== 拉取镜像: ${IMAGE} ==="
             docker pull "$IMAGE"
-
-            # 重建容器
             docker rm -f xianyu-assistant || true
             docker run -d \
               --name xianyu-assistant \
@@ -116,13 +131,21 @@ jobs:
               -v /app/fish/db:/app/dbdata \
               -v /app/fish/logs:/app/logs \
               "$IMAGE"
-
-            # 重载 Nginx
             docker exec nginx nginx -t
             docker exec nginx nginx -s reload
-
-            # 清理悬空镜像
             docker image prune -f
-
             echo "=== 部署完成: ${IMAGE} ==="
             docker ps --filter name=xianyu-assistant --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+
+      # ==================== 仅 Nginx 配置变更、后端未变时，单独 reload ====================
+      - name: SSH 仅重载 Nginx
+        if: steps.changes.outputs.nginx == 'true' && steps.changes.outputs.backend != 'true' && !(github.event_name == 'workflow_dispatch' && inputs.deploy_all)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            docker exec nginx nginx -t
+            docker exec nginx nginx -s reload
+            echo "=== Nginx 配置已重载 ==="
