@@ -27,21 +27,54 @@ RUN mvn clean package -DskipTests && \
     java -Djarmode=tools -jar target/*.jar extract --layers --launcher --destination /layers
 
 # ===== 运行时阶段 =====
-FROM eclipse-temurin:21-jre-alpine
+# Playwright Chromium 需要 glibc 及其图形运行库，不能使用 Alpine。
+FROM eclipse-temurin:21-jre-jammy
 
 LABEL maintainer="IAMLZY"
 LABEL description="XianYuAssistant - 闲鱼自动化管理系统（后端）"
 
 WORKDIR /app
 
-# 创建数据目录
-RUN mkdir -p /app/dbdata /app/logs /app/ms-playwright
+# Playwright Chromium 的运行依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    libxshmfence1 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Spring Boot 分层文件。顺序从稳定到易变，Docker 可复用 Maven 依赖层。
 COPY --from=backend-build /layers/dependencies/ ./
 COPY --from=backend-build /layers/spring-boot-loader/ ./
 COPY --from=backend-build /layers/snapshot-dependencies/ ./
 COPY --from=backend-build /layers/application/ ./
+
+# 在镜像构建时下载与 Java Playwright 依赖匹配的 Chromium。
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright
+RUN mkdir -p "$PLAYWRIGHT_BROWSERS_PATH" && \
+    java -cp "/app/BOOT-INF/lib/*" com.microsoft.playwright.CLI install chromium
 
 # 暴露端口
 EXPOSE 12400

@@ -28,8 +28,13 @@ public class PlaywrightManager {
     private static final String BROWSER_CACHE_DIR;
 
     static {
-        String jarDir = getJarDirectory();
-        BROWSER_CACHE_DIR = jarDir + File.separator + "ms-playwright";
+        String configuredPath = System.getenv("PLAYWRIGHT_BROWSERS_PATH");
+        if (configuredPath == null || configuredPath.isBlank()) {
+            configuredPath = System.getProperty("PLAYWRIGHT_BROWSERS_PATH");
+        }
+        BROWSER_CACHE_DIR = configuredPath != null && !configuredPath.isBlank()
+                ? configuredPath
+                : getJarDirectory() + File.separator + "ms-playwright";
         System.setProperty("PLAYWRIGHT_BROWSERS_PATH", BROWSER_CACHE_DIR);
         log.info("Playwright浏览器缓存目录: {}", BROWSER_CACHE_DIR);
     }
