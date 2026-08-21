@@ -107,10 +107,16 @@ jobs:
       # ========== SSH 到服务器：拉取镜像并重启 ==========
       - name: SSH 部署后端并重载 Nginx
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          ACR_REGISTRY: ${{ env.ACR_REGISTRY }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          # 将 ACR 凭据传给远程 SSH 会话，避免依赖手工 docker login 的用户和状态。
+          envs: ACR_REGISTRY,ACR_USERNAME,ACR_PASSWORD
           # appleboy/ssh-action 默认约 10 分钟；镜像首拉取可超过该时间。
           command_timeout: 40m
           script: |
@@ -118,7 +124,15 @@ jobs:
             mkdir -p /app/fish/db /app/fish/logs /app/nginx/html/fish.oioi.lat
             docker network inspect app-network >/dev/null 2>&1 || docker network create app-network
 
-            IMAGE="${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/xianyu-assistant:${{ steps.version.outputs.version }}"
+            if [ -z "${ACR_USERNAME:-}" ] || [ -z "${ACR_PASSWORD:-}" ]; then
+              echo "ACR 登录凭据未配置。"
+              exit 1
+            fi
+            printf '%s' "$ACR_PASSWORD" | docker login --username "$ACR_USERNAME" --password-stdin "$ACR_REGISTRY"
+
+            VERSION="${{ steps.version.outputs.version }}"
+            IMAGE="${ACR_REGISTRY}/${{ env.ACR_NAMESPACE }}/xianyu-assistant:${VERSION}"
+            LOCAL_IMAGE="fish:${VERSION}"
             echo "=== 拉取镜像: ${IMAGE} ==="
 
             PULL_SUCCESS=0
@@ -134,6 +148,8 @@ jobs:
               echo "镜像拉取连续失败 3 次。"
               exit 1
             fi
+
+            docker tag "$IMAGE" "$LOCAL_IMAGE"
 
             OLD_IMAGE="$(docker inspect xianyu-assistant --format '{{.Config.Image}}' 2>/dev/null || true)"
 
@@ -173,11 +189,12 @@ jobs:
               exit 1
             }
 
-            docker rm -f xianyu-assistant >/dev/null 2>&1 || true
-            run_app "$IMAGE" || rollback
+            docker stop xianyu-assistant >/dev/null 2>&1 || true
+            docker rm xianyu-assistant >/dev/null 2>&1 || true
+            run_app "$LOCAL_IMAGE" || rollback
             wait_for_health || rollback
             docker exec nginx nginx -t || rollback
             docker exec nginx nginx -s reload || rollback
             docker image prune -f
-            echo "=== 部署完成: ${IMAGE} ==="
+            echo "=== 部署完成: ${LOCAL_IMAGE} ==="
             docker ps --filter name=xianyu-assistant --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
