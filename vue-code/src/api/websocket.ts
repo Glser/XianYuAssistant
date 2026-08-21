@@ -14,6 +14,12 @@ export interface WebSocketStatus {
   autoReplyOn?: boolean;      // 是否有商品开启了自动回复
 }
 
+export interface CaptchaInfo {
+  needCaptcha: boolean
+  captchaUrl: string
+  message?: string
+}
+
 // 获取连接状态
 export function getConnectionStatus(accountId: number) {
   return request<WebSocketStatus>({
@@ -25,7 +31,7 @@ export function getConnectionStatus(accountId: number) {
 
 // 启动连接
 export function startConnection(accountId: number) {
-  return request({
+  return request<CaptchaInfo>({
     url: '/websocket/start',
     method: 'POST',
     data: { xianyuAccountId: accountId }

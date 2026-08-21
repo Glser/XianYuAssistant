@@ -27,7 +27,8 @@ DATA_DIR="/app/fish/db"
 LOG_DIR="/app/fish/logs"
 DOCKER_NETWORK="app-network"
 NGINX_CONTAINER="nginx"
-IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/xianyu-assistant:${VERSION}"
+ACR_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/xianyu-assistant:${VERSION}"
+LOCAL_IMAGE="fish:${VERSION}"
 
 echo "📦 确保数据目录存在..."
 mkdir -p "$DATA_DIR" "$LOG_DIR"
@@ -35,11 +36,11 @@ mkdir -p "$DATA_DIR" "$LOG_DIR"
 echo "🌐 确保 Docker 网络存在..."
 docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1 || docker network create "$DOCKER_NETWORK"
 
-echo "⬇️  拉取镜像: ${IMAGE}..."
+echo "⬇️  拉取镜像: ${ACR_IMAGE}..."
 PULL_SUCCESS=0
 for attempt in 1 2 3; do
   echo "第 ${attempt}/3 次拉取镜像"
-  if docker pull "$IMAGE"; then
+  if docker pull "$ACR_IMAGE"; then
     PULL_SUCCESS=1
     break
   fi
@@ -50,6 +51,9 @@ if [ "$PULL_SUCCESS" -ne 1 ]; then
   echo "镜像拉取连续失败 3 次。"
   exit 1
 fi
+
+echo "🏷️  标记本地镜像: ${LOCAL_IMAGE}..."
+docker tag "$ACR_IMAGE" "$LOCAL_IMAGE"
 
 OLD_IMAGE="$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}' 2>/dev/null || true)"
 
@@ -89,9 +93,12 @@ rollback() {
   exit 1
 }
 
-echo "🔄 重建容器..."
-docker rm -f "$CONTAINER_NAME" || true
-run_app "$IMAGE" || rollback
+echo "⏹️  停止旧版本容器..."
+docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+echo "🚀 启动新版本: ${LOCAL_IMAGE}..."
+run_app "$LOCAL_IMAGE" || rollback
 wait_for_health || rollback
 
 echo "🌐 重载 Nginx..."
@@ -101,5 +108,5 @@ docker exec "$NGINX_CONTAINER" nginx -s reload || rollback
 echo "🧹 清理悬空镜像..."
 docker image prune -f
 
-echo "✅ 部署完成: ${IMAGE}"
+echo "✅ 部署完成: ${LOCAL_IMAGE}"
 docker ps --filter name="$CONTAINER_NAME" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"

@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue';
 
 interface Props {
   modelValue: boolean;
+  captchaUrl?: string;
 }
 
 interface Emits {
@@ -55,7 +56,7 @@ onUnmounted(() => {
             <div class="captcha-steps">
               <div class="step-item">
                 <span class="step-number">1</span>
-                <span class="step-text">点击下方按钮访问闲鱼IM页面</span>
+              <span class="step-text">点击下方按钮打开闲鱼返回的验证页面</span>
               </div>
               <div class="step-item">
                 <span class="step-number">2</span>
@@ -77,7 +78,7 @@ onUnmounted(() => {
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" @click="handleClose">取消</button>
-            <button class="btn btn-primary" @click="handleConfirm">访问闲鱼IM</button>
+            <button class="btn btn-primary" :disabled="!captchaUrl" @click="handleConfirm">打开验证页面</button>
           </div>
         </div>
       </div>
@@ -266,6 +267,11 @@ onUnmounted(() => {
 
 .btn-primary:hover {
   background: #0077ed;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .modal-enter-active,

@@ -51,7 +51,13 @@ public class ApiDeliveryScheduler {
                     if (webSocketService.isConnected(account.getId())) {
                         continue;
                     }
-                    pollAndDeliver(account.getId());
+
+                    List<XianyuGoodsConfig> goodsConfigs = goodsConfigMapper.selectByAccountId(account.getId());
+                    if (!hasAutoDeliveryEnabled(goodsConfigs)) {
+                        continue;
+                    }
+
+                    pollAndDeliver(account.getId(), goodsConfigs);
                 } catch (Exception e) {
                     log.warn("【账号{}】API发货轮询异常: {}", account.getId(), e.getMessage());
                 }
@@ -61,14 +67,21 @@ public class ApiDeliveryScheduler {
         }
     }
 
+    private boolean hasAutoDeliveryEnabled(List<XianyuGoodsConfig> goodsConfigs) {
+        if (goodsConfigs == null || goodsConfigs.isEmpty()) {
+            return false;
+        }
+        return goodsConfigs.stream().anyMatch(config ->
+                config.getXianyuAutoDeliveryOn() != null && config.getXianyuAutoDeliveryOn() == 1);
+    }
+
     @SuppressWarnings("unchecked")
-    private void pollAndDeliver(Long accountId) {
+    private void pollAndDeliver(Long accountId, List<XianyuGoodsConfig> goodsConfigs) {
         List<Map<String, Object>> pendingOrders = orderService.queryPendingOrders(accountId);
         if (pendingOrders == null || pendingOrders.isEmpty()) return;
 
         pendingOrderPollService.syncOrdersToDb(accountId, pendingOrders);
 
-        List<XianyuGoodsConfig> goodsConfigs = goodsConfigMapper.selectByAccountId(accountId);
         Set<String> autoDeliveryGoodsIds = new HashSet<>();
         if (goodsConfigs != null) {
             for (XianyuGoodsConfig config : goodsConfigs) {

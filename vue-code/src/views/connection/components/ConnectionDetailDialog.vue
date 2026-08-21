@@ -46,6 +46,7 @@ const showManualUpdateTokenDialog = ref(false);
 const showQRUpdateDialog = ref(false);
 // 滑块验证引导对话框
 const showCaptchaGuideDialog = ref(false);
+const captchaUrl = ref('');
 
 // 响应式检测
 const isMobile = ref(false);
@@ -98,6 +99,7 @@ const handleStartConnection = async () => {
       addLog('连接启动成功');
       await loadConnectionStatus();
     } else if (response.code === 1001 && response.data?.needCaptcha) {
+      captchaUrl.value = response.data.captchaUrl;
       addLog('⚠️ 检测到需要滑块验证', true);
       showCaptchaGuideDialog.value = true;
     } else {
@@ -246,10 +248,13 @@ const handleQRUpdateSuccess = async () => {
 
 // 滑块验证确认回调
 const handleCaptchaConfirm = () => {
-  window.open('https://www.goofish.com/im', '_blank');
-  addLog('✅ 已打开闲鱼IM页面');
-  addLog('📌 完成验证后，请点击"❓ 如何获取？"按钮查看教程');
-  showInfo('请在闲鱼IM页面完成验证，然后使用帮助按钮获取Cookie和Token');
+  if (!captchaUrl.value) {
+    showError('未获取到有效的滑块验证链接');
+    return;
+  }
+  window.open(captchaUrl.value, '_blank', 'noopener,noreferrer');
+  addLog('✅ 已打开闲鱼验证页面');
+  showInfo('请在验证页面完成操作后更新 Cookie');
 };
 
 // 关闭对话框
@@ -498,6 +503,7 @@ onBeforeUnmount(() => {
     <!-- 滑块验证引导对话框 -->
     <CaptchaGuideDialog
       v-model="showCaptchaGuideDialog"
+      :captcha-url="captchaUrl"
       @confirm="handleCaptchaConfirm"
     />
         </div>

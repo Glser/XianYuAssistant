@@ -30,10 +30,27 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(CaptchaRequiredException.class)
     public Map<String, Object> handleCaptchaRequiredException(CaptchaRequiredException e) {
         Map<String, Object> result = new HashMap<>();
-        result.put("code", 401);
-        result.put("message", e.getMessage());
-        result.put("captchaUrl", e.getCaptchaUrl());
+        if (isValidCaptchaUrl(e.getCaptchaUrl())) {
+            result.put("code", 1001);
+            result.put("message", e.getMessage());
+            result.put("captchaUrl", e.getCaptchaUrl());
+        } else {
+            result.put("code", 1002);
+            result.put("message", "闲鱼账号触发风控，暂未返回可打开的滑块验证链接。请稍后再试，避免重复请求。");
+        }
         return result;
+    }
+
+    private boolean isValidCaptchaUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(value);
+            return "https".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
     
     /**

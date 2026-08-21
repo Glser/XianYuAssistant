@@ -48,6 +48,7 @@ let statusInterval: number | null = null
 const showManualUpdateCookieDialog = ref(false)
 const showQRUpdateDialog = ref(false)
 const showCaptchaGuideDialog = ref(false)
+const captchaUrl = ref('')
 const showCredentialDialog = ref(false)
 
 const loadConnectionStatus = async (silent = false) => {
@@ -95,6 +96,7 @@ const handleStartConnection = async () => {
       await loadConnectionStatus()
       toast.info('1、请勿使用闲鱼网页版进行消息回复，不然容易触发风控；2、刚开始使用会掉线且无法自动刷新的情况，属于正常，多挂几天就好了；3、有问题可以在"系统设置"->"关于"加入交流群；')
     } else if (response.code === 1001 && response.data?.needCaptcha) {
+      captchaUrl.value = response.data.captchaUrl
       showCaptchaGuideDialog.value = true
     } else {
       throw new Error(response.msg || '启动连接失败')
@@ -147,8 +149,12 @@ const handleQRUpdateSuccess = async () => {
 }
 
 const handleCaptchaConfirm = () => {
-  window.open('https://www.goofish.com/im', '_blank')
-  showInfo('请完成验证后使用帮助按钮获取凭证')
+  if (!captchaUrl.value) {
+    showError('未获取到有效的滑块验证链接')
+    return
+  }
+  window.open(captchaUrl.value, '_blank', 'noopener,noreferrer')
+  showInfo('请在验证页面完成操作后更新 Cookie')
 }
 
 const getCookieStatusText = (status?: number) => {
@@ -359,6 +365,7 @@ onBeforeUnmount(() => {
     />
     <CaptchaGuideDialog
       v-model="showCaptchaGuideDialog"
+      :captcha-url="captchaUrl"
       @confirm="handleCaptchaConfirm"
     />
   </div>

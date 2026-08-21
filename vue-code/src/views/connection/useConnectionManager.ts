@@ -143,6 +143,7 @@ export function useConnectionManager() {
         addLog('连接启动成功')
         await loadConnectionStatus(selectedAccountId.value)
       } else if (response.code === 1001 && response.data?.needCaptcha) {
+        const captchaUrl = response.data.captchaUrl
         addLog('检测到需要滑块验证', true)
         await showConfirm(
           `检测到账号需要完成滑块验证。\n\n` +
@@ -154,9 +155,9 @@ export function useConnectionManager() {
           `💡 滑块校验生效会延迟，稍等片刻会自动连接闲鱼服务器`,
           '需要滑块验证'
         )
-        window.open('https://www.goofish.com/im', '_blank')
-        addLog('已打开闲鱼IM页面')
-        showInfo('请完成验证后使用帮助按钮获取凭证')
+        window.open(captchaUrl, '_blank', 'noopener,noreferrer')
+        addLog('已打开闲鱼验证页面')
+        showInfo('请在验证页面完成操作后更新 Cookie')
       } else {
         throw new Error(response.msg || '启动连接失败')
       }

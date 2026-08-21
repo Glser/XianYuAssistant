@@ -77,6 +77,10 @@ public class WebSocketController {
             
         } catch (com.feijimiao.xianyuassistant.exception.CaptchaRequiredException e) {
             log.warn("⚠️ 需要滑块验证: accountId={}, url={}", reqDTO.getXianyuAccountId(), e.getCaptchaUrl());
+            if (!isValidCaptchaUrl(e.getCaptchaUrl())) {
+                return ResultObject.failed(1002, "闲鱼账号触发风控，暂未返回可打开的滑块验证链接。请稍后再试，避免重复启动连接或刷新凭证。");
+            }
+
             CaptchaInfoDTO captchaInfo = new CaptchaInfoDTO();
             captchaInfo.setNeedCaptcha(true);
             captchaInfo.setCaptchaUrl(e.getCaptchaUrl());
@@ -101,6 +105,18 @@ public class WebSocketController {
         } catch (Exception e) {
             log.error("启动WebSocket失败", e);
             return ResultObject.failed("启动WebSocket失败: " + e.getMessage());
+        }
+    }
+
+    private boolean isValidCaptchaUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(value);
+            return "https".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null;
+        } catch (IllegalArgumentException e) {
+            return false;
         }
     }
     
